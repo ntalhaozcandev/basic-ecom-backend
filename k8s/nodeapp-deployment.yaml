@@ -3,6 +3,8 @@ kind: Deployment
 metadata:
   name: node-app
   namespace: ecommerce
+  labels:
+    app: node-app
 spec:
   replicas: 2
   selector:
@@ -13,24 +15,25 @@ spec:
       labels:
         app: node-app
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
       containers:
         - name: node-app
           # Build & push your image, then put it here:
           image: ghcr.io/youruser/your-node-app:1.0.0
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 3000
+              name: http
           env:
+            - name: NODE_ENV
+              value: "production"
             - name: PORT
-              valueFrom:
-                configMapKeyRef:
-                  name: node-app-config
-                  key: PORT
-            - name: MONGO_DB
-              valueFrom:
-                configMapKeyRef:
-                  name: node-app-config
-                  key: MONGO_DB
+              value: "3000"
+            - name: DB_URI
+              value: "mongodb://$(MONGO_USERNAME):$(MONGO_PASSWORD)@mongo:27017/$(MONGO_DB)?authSource=admin"
             - name: MONGO_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -41,21 +44,32 @@ spec:
                 secretKeyRef:
                   name: mongo-auth
                   key: password
-            # Compose a MONGO_URL from the vars above
-            - name: MONGO_URL
-              value: "mongodb://$(MONGO_USERNAME):$(MONGO_PASSWORD)@mongo:27017/$(MONGO_DB)?authSource=admin"
+            - name: MONGO_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: node-app-config
+                  key: MONGO_DB
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: jwt-secret
           readinessProbe:
             httpGet:
               path: /healthz
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /healthz
               port: 3000
-            initialDelaySeconds: 20
+            initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           resources:
             requests:
               cpu: "100m"
@@ -63,3 +77,9 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL    

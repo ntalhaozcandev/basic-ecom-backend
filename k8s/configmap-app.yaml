@@ -6,3 +6,5 @@ metadata:
 data:
   PORT: "3000"
   MONGO_DB: "app"
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"

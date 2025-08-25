@@ -1,16 +1,28 @@
-# syntax=docker/dockerfile:1
 FROM node:18-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
-# Prefer reproducible installs; fall back to npm install if no lockfile exists
 RUN npm ci --omit=dev || npm install --production
 
 FROM node:18-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+
+# Add non-root user for security
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S nextjs -u 1001
+
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-# If your app has a build step (e.g., TypeScript), uncomment:
-# RUN npm run build
+COPY --chown=nextjs:nodejs . .
+
+# Create directory for logs and temp files
+RUN mkdir -p /app/logs && chown nextjs:nodejs /app/logs
+
+USER nextjs
+
 EXPOSE 3000
+
+# Add health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD node healthcheck.js || exit 1
+
 CMD ["npm", "start"]
