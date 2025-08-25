@@ -5,9 +5,9 @@ const { requireFields } = require('../utils/util');
 const { ObjectId } = require('mongoose').Types;
 
 const register = async (req, res) => {
-    const { email, password } = req.body;
+    const { name, email, password, role } = req.body;
 
-    const errMsg = requireFields(req.body, ['email', 'password']);
+    const errMsg = requireFields(req.body, ['name', 'email', 'password']);
     if (errMsg) return res.status(400).json({ message: errMsg });
 
     try {
@@ -16,7 +16,7 @@ const register = async (req, res) => {
 
         const hashedPass = await bcrypt.hash(password, 10);
 
-        const user = await User.create({ email, password: hashedPass });
+        const user = await User.create({ name, email, password: hashedPass, role });
         await user.validate();
         await user.save();
 
@@ -26,7 +26,8 @@ const register = async (req, res) => {
             token,
             user: {
                 id: user._id,
-                email: user.email
+                email: user.email,
+                role: user.role
             }
         });
         
@@ -50,7 +51,7 @@ const login = async (req, res) => {
         
         const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
 
-        res.status(200).json({token, user: { id: user._id }});
+        res.status(200).json({token, user: { id: user._id, role: user.role, email: user.email }});
     } catch (error) {
         console.error(`Error logging in user: ${error.message}`);
         return res.status(500).json({ message: 'Internal server error' });
@@ -72,6 +73,16 @@ const getUser = async (req, res) => {
         res.status(200).json({ user });
     } catch (error) {
         console.error(`Error fetching user: ${error.message}`);
+        return res.status(500).json({ message: 'Internal server error' });
+    }
+};
+
+const getAllUsers = async (req, res) => {
+    try {
+        const users = await User.find().select('-password');
+        res.status(200).json({ users });
+    } catch (error) {
+        console.error(`Error fetching users: ${error.message}`);
         return res.status(500).json({ message: 'Internal server error' });
     }
 };
@@ -128,5 +139,6 @@ module.exports = {
     getUser,
     login,
     updateUser,
-    deleteUser
+    deleteUser,
+    getAllUsers
 };

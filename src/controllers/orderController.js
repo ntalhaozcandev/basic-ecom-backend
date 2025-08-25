@@ -54,8 +54,11 @@ const createOrder = async (req, res) => {
             paymentStatus: 'unpaid'
         });
 
-        cart.items = [];
-        await cart.save();
+        // Fix: Use findOneAndUpdate to avoid version conflicts
+        await Cart.findOneAndUpdate(
+            { user: userId },
+            { $set: { items: [], updatedAt: new Date() } }
+        );
 
         return res.status(201).json({ order });
     } catch (error) {

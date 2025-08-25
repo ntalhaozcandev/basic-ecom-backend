@@ -1,0 +1,43 @@
+version: "3.9"
+services:
+  app:
+    build: .
+    container_name: node_app
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - .env
+    environment:
+      # Fallback if .env doesn't define MONGO_URL
+      - MONGO_URL=${MONGO_URL:-mongodb://root:${MONGO_PASSWORD:-password}@mongo:27017/${MONGO_DB:-app}?authSource=admin}
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:6
+    container_name: mongo
+    restart: always
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD:-password}
+      - MONGO_INITDB_DATABASE=${MONGO_DB:-app}
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+
+  # Optional: Mongo Express UI at http://localhost:8081
+  mongo-express:
+    image: mongo-express:1.0.2
+    restart: always
+    depends_on:
+      - mongo
+    ports:
+      - "8081:8081"
+    environment:
+      - ME_CONFIG_MONGODB_ADMINUSERNAME=root
+      - ME_CONFIG_MONGODB_ADMINPASSWORD=${MONGO_PASSWORD:-password}
+      - ME_CONFIG_MONGODB_URL=mongodb://root:${MONGO_PASSWORD:-password}@mongo:27017/?authSource=admin
+
+volumes:
+  mongo_data:
