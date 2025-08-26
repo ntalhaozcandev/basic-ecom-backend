@@ -21,8 +21,7 @@ spec:
         runAsGroup: 1001
       containers:
         - name: node-app
-          # Build & push your image, then put it here:
-          image: ghcr.io/youruser/your-node-app:1.0.0
+          image: ghcr.io/ntalhaozcandev/basic-ecom-backend:1.0.0
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
