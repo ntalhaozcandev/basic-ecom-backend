@@ -28,7 +28,16 @@ app.use('/api', productRoutes);
 app.use('/api', cartRoutes);
 app.use('/api', orderRoutes);
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+const PORT = process.env.PORT || 3000;
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on ${PORT}`);
+});
+
+// Graceful shutdown for SIGTERM from Render
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down...');
+  server.close(async () => {
+    try { await mongoose.connection.close(false); } catch {}
+    process.exit(0);
+  });
 });
