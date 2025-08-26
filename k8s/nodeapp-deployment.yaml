@@ -32,22 +32,10 @@ spec:
             - name: PORT
               value: "3000"
             - name: DB_URI
-              value: "mongodb://$(MONGO_USERNAME):$(MONGO_PASSWORD)@mongo:27017/$(MONGO_DB)?authSource=admin"
-            - name: MONGO_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: mongo-auth
-                  key: username
-            - name: MONGO_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: mongo-auth
-                  key: password
-            - name: MONGO_DB
-              valueFrom:
-                configMapKeyRef:
-                  name: node-app-config
-                  key: MONGO_DB
+                  name: app-secrets
+                  key: db-uri
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
