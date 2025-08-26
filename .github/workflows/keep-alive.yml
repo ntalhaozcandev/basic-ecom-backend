@@ -1,0 +1,13 @@
+name: Keep Render Warm
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # every 10 minutes (cron is in UTC)
+  workflow_dispatch:          # allow manual runs from Actions tab
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render health endpoint
+        run: |
+          URL="https://your-app.onrender.com/healthz"
+          curl -fsS --max-time 10 "$URL" || exit 1
