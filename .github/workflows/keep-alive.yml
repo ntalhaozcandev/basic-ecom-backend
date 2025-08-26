@@ -9,5 +9,5 @@ jobs:
     steps:
       - name: Ping Render health endpoint
         run: |
-          URL="https://your-app.onrender.com/healthz"
+          URL="https://basic-ecom-backend-kncy.onrender.com/healthz"
           curl -fsS --max-time 10 "$URL" || exit 1
