@@ -1,5 +1,6 @@
 const crypto = require('crypto');
-const { ref } = require('process');
+const Order = require('../models/Order');
+const { time } = require('console');
 
 const PAYMENT_PROCESSORS = {
     STRIPE: {
@@ -31,12 +32,6 @@ const PAYMENT_PROCESSORS = {
         avgProcessingTime: 1800
     }
 };
-
-// Mock database for storing payment intents and transactions
-const mockPaymentIntents = new Map();
-const mockTransactions = new Map();
-const mockCustomers = new Map();
-const mockRefunds = new Map();
 
 // Common error scenarios
 const PAYMENT_ERRORS = {
@@ -74,7 +69,20 @@ class MockPaymentService {
                 last_payment_error: null
             };
 
-            mockPaymentIntents.set(paymentIntentId, paymentIntent);
+            if (metadata.orderId) {
+                await Order.findByIdAndUpdate(metadata.orderId, {
+                    paymentIntentId: paymentIntentId,
+                    $push: {
+                        'paymentHistory': {
+                            action: 'intent_created',
+                            paymentIntentId: paymentIntentId,
+                            amount: paymentIntent.amount,
+                            status: paymentIntent.status,
+                            time: new Date()
+                        }
+                    }
+                });
+            }
 
             return {
                 success: true,
@@ -96,14 +104,13 @@ class MockPaymentService {
             const processingTime = PAYMENT_PROCESSORS[processor]?.avgProcessingTime || 2000;
             await this._delay(processingTime * 0.5, processingTime * 1.5);
 
-            const paymentIntent = mockPaymentIntents.get(paymentIntentId);
-            if (!paymentIntent) {
+            const order = await Order.findOne({ paymentIntentId });
+            if (!order) {
                 throw new Error('Payment intent not found');
             }
 
-            if (paymentIntent.status !== 'requires_payment_method' &&
-                paymentIntent.status !== 'requires_confirmation') {
-                    throw new Error('Payment intent cannot be confirmed in its current status');
+            if (order.paymentStatus === 'paid') {
+                throw new Error('Payment intent already confirmed');
             }
 
             // Payment method validation simulation
@@ -118,48 +125,84 @@ class MockPaymentService {
                 const errorKeys = Object.keys(PAYMENT_ERRORS);
                 const randomError = PAYMENT_ERRORS[errorKeys[Math.floor(Math.random() * errorKeys.length)]];
 
-                paymentIntent.status = 'requires_payment_method';
-                paymentIntent.last_payment_error = {
-                    ...randomError,
-                    payment_method: paymentMethodData
-                };
+                await Order.findByIdAndUpdate(order._id, {
+                    $push: {
+                        'paymentHistory': {
+                            action: 'payment_failed',
+                            paymentIntentId: paymentIntentId,
+                            error: randomError,
+                            timestamp: new Date()
+                        }
+                    }
+                });
 
                 return {
                     success: false,
-                    payment_intent: paymentIntent,
+                    payment_intent: {
+                        id: paymentIntentId,
+                        status: 'requires_payment_method',
+                        last_payment_error: randomError
+                    },
                     error: randomError
                 };
             }
 
             // Processing fee calculation
-            const amountInDollars = paymentIntent.amount / 100;
+            const amountInDollars = order.paymentInfo.amount / 100;
             const processingFee = Math.round(amountInDollars * processorConfig.processingFee + processorConfig.fixedFee * 100);
-            const netAmount = paymentIntent.amount - processingFee;
+            const netAmount = order.paymentInfo.amount - processingFee;
 
             // Transaction record creation
             const transactionId = this._generateId('txn');
+            const paymentInfo = {
+                transactionId: transactionId,
+                processor: processor,
+                payment_method: paymentMethodData.type,
+                amount: amountInDollars,
+                processingFee: processingFee,
+                netAmount: netAmount,
+                paidAt: new Date()
+            };
+
+            await Order.findByIdAndUpdate(order._id, {
+                paymentStatus: 'paid',
+                status: 'paid',
+                paymentInfo: paymentInfo,
+                $push: {
+                    'paymentHistory': {
+                        action: 'payment_confirmed',
+                        paymentIntentId: paymentIntentId,
+                        transactionId: transactionId,
+                        amount: amountInDollars * 100, // in cents
+                        timestamp: new Date()
+                    }
+                }
+            });
+
+            const paymentIntent = {
+                id: paymentIntentId,
+                amount: amountInDollars * 100, // in cents
+                currency: 'usd',
+                status: 'succeeded',
+                payment_method: paymentMethodData,
+                transaction_id: transactionId,
+                processing_fee: processingFee * 100, // in cents
+                net_amount: netAmount * 100 // in cents
+            };
+
             const transaction = {
                 id: transactionId,
                 payment_intent_id: paymentIntentId,
-                amount: paymentIntent.amount,
-                currency: paymentIntent.currency,
-                net_amount: netAmount,
-                processing_fee: processingFee,
+                amount: amountInDollars * 100,
+                currency: 'usd',
+                net_amount: netAmount * 100,
+                processing_fee: processingFee * 100,
                 processor: processor,
                 payment_method: paymentMethodData,
                 status: 'succeeded',
                 created: Math.floor(Date.now() / 1000),
-                metadata: paymentIntent.metadata
+                metadata: { orderId: order._id.toString() }
             };
-
-            mockTransactions.set(transactionId, transaction);
-
-            // Update payment intent
-            paymentIntent.status = 'succeeded';
-            paymentIntent.payment_method = paymentMethodData;
-            paymentIntent.transaction_id = transactionId;
-            paymentIntent.processing_fee = processingFee;
-            paymentIntent.net_amount = netAmount;
 
             return {
                 success: true,
@@ -207,27 +250,28 @@ class MockPaymentService {
         try {
             await this._delay(1000, 2000);
 
-            const transaction = mockTransactions.get(transactionId);
-            if (!transaction) {
+            const order = await Order.findOne({ 'paymentInfo.transactionId': transactionId });
+            if (!order) {
                 throw new Error('Transaction not found');
             }
 
-            if (transaction.status !== 'succeeded') {
-                throw new Error('Only successful transactions can be refunded');
+            if (order.paymentStatus !== 'paid') {
+                throw new Error('Only paid orders can be refunded');
             }
 
-            const refundAmount = amount || transaction.amount;
+            const refundAmount = amount || order.paymentInfo.amount;
 
-            if (refundAmount > transaction.amount) {
+            if (refundAmount > order.paymentInfo.amount) {
                 throw new Error('Refund amount exceeds original transaction amount');
             }
 
-            const existingRefunds = Array.from(mockRefunds.values())
-                .filter(r => r.transaction_id === transactionId && r.status === 'succeeded');
+            const totalRefunded = order.refunds ? order.refunds.reduce((sum, r) => sum + r.amount, 0) : 0;
+            
+            if (totalRefunded >= order.paymentInfo.amount) {
+                throw new Error('Transaction has already been fully refunded');
+            }
 
-            const totalRefunded = existingRefunds.reduce((sum, r) => sum + r.amount, 0);
-
-            if (totalRefunded + refundAmount > transaction.amount) {
+            if (totalRefunded + refundAmount > order.paymentInfo.amount) {
                 throw new Error('Refund amount would exceed available balance');
             }
 
@@ -238,25 +282,34 @@ class MockPaymentService {
 
             const refundId = this._generateId('ref');
             const refund = {
-                id: refundId,
-                transaction_id: transactionId,
+                refundId: refundId,
                 amount: refundAmount,
-                currency: transaction.currency,
                 reason,
-                status: 'succeeded',
-                created: Math.floor(Date.now() / 1000),
-                metadata: { original_transaction: transactionId }
+                processedAt: new Date()
             };
 
-            mockRefunds.set(refundId, refund);
+            const updateData = {
+                $push: { refunds: refund }
+            };
 
-            if (totalRefunded + refundAmount === transaction.amount) {
-                transaction.status = 'refunded';
+            if (totalRefunded + refundAmount === order.paymentInfo.amount) {
+                updateData.paymentStatus = 'refunded';
+                updateData.status = 'canceled';
             }
+
+            await Order.findByIdAndUpdate(order._id, updateData);
 
             return {
                 success: true,
-                refund
+                refund: {
+                    id: refundId,
+                    transaction_id: transactionId,
+                    amount: refundAmount,
+                    currency: 'usd',
+                    reason,
+                    status: 'succeeded',
+                    created: Math.floor(Date.now() / 1000)
+                }
             };
         } catch (error) {
             return {
@@ -273,9 +326,9 @@ class MockPaymentService {
         try {
             await this._delay(200, 500);
 
-            const paymentIntent = mockPaymentIntents.get(paymentIntentId);
+            const order = await Order.findOne({ paymentIntentId });
 
-            if (!paymentIntent) {
+            if (!order) {
                 return {
                     success: false,
                     error: {
@@ -283,6 +336,25 @@ class MockPaymentService {
                         message: 'Payment intent not found'
                     }
                 };
+            }
+
+            const paymentIntent = {
+                id: paymentIntentId,
+                amount: order.total * 100, // in cents
+                currency: 'usd',
+                status: order.paymentStatus === 'paid' ? 'succeeded' : 'requires_payment_method',
+                metadata: {
+                    orderId: order._id.toString(),
+                    userId: order.user.toString()
+                },
+                created: Math.floor(order.createdAt.getTime() / 1000)
+            }
+
+            if (order.paymentInfo) {
+                paymentIntent.payment_method = {
+                    type: order.paymentInfo.paymentMethod
+                };
+                paymentIntent.transaction_id = order.paymentInfo.transactionId;
             }
 
             return {
@@ -304,9 +376,9 @@ class MockPaymentService {
         try {
             await this._delay(200, 500);
 
-            const transaction = mockTransactions.get(transactionId);
+            const order = await Order.findOne({ 'paymentInfo.transactionId': transactionId });
 
-            if (!transaction) {
+            if (!order || !order.paymentInfo) {
                 return {
                     success: false,
                     error: {
@@ -316,15 +388,29 @@ class MockPaymentService {
                 };
             }
 
-            const refunds = Array.from(mockRefunds.values())
-                .filter(r => r.transaction_id === transactionId);
+            const transaction = {
+                id: transactionId,
+                payment_intent_id: order.paymentIntentId,
+                amount: order.paymentInfo.amount * 100, // in cents
+                currency: 'usd',
+                net_amount: order.paymentInfo.netAmount * 100,
+                processing_fee: order.paymentInfo.processingFee * 100,
+                processor: order.paymentInfo.processor,
+                payment_method: {
+                    type: order.paymentInfo.paymentMethod
+                },
+                status: 'succeeded',
+                created: Math.floor(order.paymentInfo.paidAt.getTime() / 1000),
+                metadata: {
+                    orderId: order._id.toString(),
+                    userId: order.user.toString()
+                },
+                refunds: order.refunds || []
+            };
 
             return {
                 success: true,
-                transaction: {
-                    ...transaction,
-                    refunds
-                }
+                transaction
             };
         } catch (error) {
             return {
@@ -335,36 +421,6 @@ class MockPaymentService {
                 }
             }
         }
-    }
-
-    async simulateWebhook(eventType, objectId) {
-        const webhookEvents = {
-            'payment_intent.succeeded': () => mockPaymentIntents.get(objectId),
-            'payment_intent.payment_failed': () => mockPaymentIntents.get(objectId),
-            'charge.succeeded': () => mockTransactions.get(objectId),
-            'charge.refunded': () => mockTransactions.get(objectId)
-        };
-
-        const eventData = webhookEvents[eventType]?.();
-
-        if (!eventData) {
-            return {
-                success: false,
-                error: 'Invalid event type or object not found'
-            };
-        }
-
-        return {
-            success: true,
-            event: {
-                id: this._generateId('evt'),
-                type: eventType,
-                data: {
-                    object: eventData
-                },
-                created: Math.floor(Date.now() / 1000)
-            }
-        };
     }
 
     // Private helper methods

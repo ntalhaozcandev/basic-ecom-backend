@@ -26,21 +26,43 @@ const paymentSchema = new Schema({
     paymentMethod: String,
     amount: Number,
     processingFee: Number,
-    paidAt: Date,
-    status: { type: String, enum: ['pending', 'completed', 'failed', 'refunded'] }
+    netAmount: Number,
+    paidAt: Date
 }, { _id: false });
 
 const shipmentSchema = new Schema({
     shipmentId: String,
     trackingNumber: String,
     carrier: {
+        id: String,
         name: String,
         service: String
     },
-    cost: Number,
+    shippingCost: Number,
     labelUrl: String,
-    estimatedDelivery: Date,
-    status: { type: String, enum: ['created', 'picked_up', 'in_transit', 'delivered'] }
+    estimatedDeliveryDate: String,
+    status: String,
+    createdAt: Date,
+    cancelledAt: Date
+}, { _id: false });
+
+const paymentHistorySchema = new Schema({
+    action: { type: String, enum: ['intent_created', 'payment_confirmed', 'payment_failed', 'refund_processed'] },
+    paymentIntentId: String,
+    transactionId: String,
+    amount: Number,
+    status: String,
+    error: Schema.Types.Mixed,
+    timestamp: { type: Date, default: Date.now }
+}, { _id: false });
+
+const shippingHistorySchema = new Schema({
+    action: { type: String, enum: ['rates_calculated', 'label_created', 'shipment_cancelled', 'status_updated'] },
+    shipmentId: String,
+    trackingNumber: String,
+    status: String,
+    location: String,
+    timestamp: { type: Date, default: Date.now }
 }, { _id: false });
 
 const orderSchema = new Schema({
@@ -53,8 +75,17 @@ const orderSchema = new Schema({
     paymentMethod: { type: String },
     paymentStatus: { type: String, enum: ['unpaid', 'paid', 'refunded'], default: 'unpaid' },
     placedAt: { type: Date, default: Date.now },
+    paymentIntentId: { type: String },
+    refunds: [{
+        refundId: String,
+        amount: Number,
+        reason: String,
+        processedAt: Date
+    }],
     paymentInfo: paymentSchema,
-    shippingInfo: shipmentSchema
+    shippingInfo: shipmentSchema,
+    paymentHistory: { type: [paymentHistorySchema], default: [] },
+    shippingHistory: { type: [shippingHistorySchema], default: [] }
 }, { timestamps: true });
 
 orderSchema.pre('validate', function(next) {

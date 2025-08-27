@@ -1,6 +1,5 @@
 const crypto = require('crypto');
-const { successResponse } = require('../utils/util');
-const { stat } = require('fs');
+const Order = require('../models/Order');
 
 const CARRIERS = {
     UPS: {
@@ -39,9 +38,6 @@ const TRACKING_STATUSES = [
     'Out for Delivery',
     'Delivered'
 ];
-
-const mockShipmentDB = new Map();
-const mockTrackingDB = new Map();
 
 class MockShippingService {
 
@@ -102,26 +98,35 @@ class MockShippingService {
             const trackingNumber = this._generateTrackingNumber(selectedRate.carrierId);
             const shipmentId = this._generateShipmentId();
 
-            const shipment = {
+            const shippingInfo = {
                 shipmentId,
                 trackingNumber,
-                carrierId: selectedRate.carrierId,
-                carrierName: selectedRate.carrierName,
-                serviceId: selectedRate.serviceId,
-                serviceName: selectedRate.serviceName,
-                orderId: orderInfo.id,
-                destination,
-                packageInfo: orderInfo.packageInfo,
-                rate: selectedRate.rate,
-                status: 'Label Created',
-                createdAt: new Date(),
+                carrier: {
+                    id: selectedRate.carrierId,
+                    name: selectedRate.carrierName,
+                    service: selectedRate.serviceName
+                },
+                shippingCost: selectedRate.rate,
+                labelUrl: `https://shippinglabels.example.com/${shipmentId}.pdf`,
                 estimatedDeliveryDate: selectedRate.estimatedDeliveryDate,
-                labelUrl: `https://shippinglabels.example.com/${shipmentId}.pdf`
+                status: 'Label Created',
+                createdAt: new Date()
             };
 
-            mockShipmentDB.set(shipmentId, shipment);
+            await Order.findByIdAndUpdate(orderInfo.orderId, {
+                shippingInfo: shippingInfo,
+                $push: {
+                    'shippingHistory': {
+                        action: 'label_created',
+                        shipmentId: shipmentId,
+                        trackingNumber: trackingNumber,
+                        status: 'Label Created',
+                        timestamp: new Date()
+                    }
+                }
+            });
 
-            await this._initializeTracking(trackingNumber, shipment);
+            await this._initializeTracking(trackingNumber, shippingInfo);
 
             // Occasional failure simulation (5% chance)
             if (Math.random() < 0.05) {
@@ -132,14 +137,10 @@ class MockShippingService {
                 success: true,
                 shipmentId,
                 trackingNumber,
-                labelUrl: `https://shippinglabels.example.com/${shipmentId}.pdf`,
+                labelUrl: shippingInfo.labelUrl,
                 rate: selectedRate.rate,
                 estimatedDeliveryDate: selectedRate.estimatedDeliveryDate,
-                carrier: {
-                    id: selectedRate.carrierId,
-                    name: selectedRate.carrierName,
-                    service: selectedRate.serviceName
-                }
+                carrier: shippingInfo.carrier
             };
         } catch (error) {
             return {
@@ -154,9 +155,9 @@ class MockShippingService {
             // Simulate API delay
             await this._delay(300, 800);
 
-            const trackingEvents = mockTrackingDB.get(trackingNumber);
+            const order = await Order.findOne({ 'shippingInfo.trackingNumber': trackingNumber });
 
-            if (!trackingEvents) {
+            if (!order || !order.shippingInfo) {
                 return {
                     success: false,
                     error: 'Tracking number not found'
@@ -164,20 +165,21 @@ class MockShippingService {
             }
 
             // Simulate tracking progression over time
-            await this._updateTrackingProgress(trackingNumber);
+            await this._updateTrackingProgress(trackingNumber, order);
 
-            const updatedEvents = mockTrackingDB.get(trackingNumber);
-            const latestEvent = updatedEvents[updatedEvents.length - 1];
+            const updatedOrder = await Order.findById(order._id);
+            const trackingEvents = updatedOrder.shippingHistory.filter(h => h.trackingNumber === trackingNumber);
+            
+            const latestEvent = trackingEvents[trackingEvents.length - 1];
 
             return {
                 success: true,
                 trackingNumber,
                 status: latestEvent.status,
-                estimatedDeliveryDate: latestEvent.estimatedDeliveryDate,
-                events: updatedEvents.map(event => ({
+                estimatedDeliveryDate: updatedOrder.shippingInfo.estimatedDeliveryDate,
+                events: trackingEvents.map(event => ({
                     status: event.status,
-                    description: event.description,
-                    location: event.location,
+                    location: event.location || 'Unknown',
                     timestamp: event.timestamp
                 }))
             };
@@ -193,29 +195,40 @@ class MockShippingService {
         try {
             await this._delay(500, 1000);
 
-            const shipment = mockShipmentDB.get(shipmentId);
+            const order = await Order.findOne({ 'shippingInfo.shipmentId': shipmentId });
 
-            if (!shipment) {
+            if (!order || !order.shippingInfo) {
                 return {
                     success: false,
                     error: 'Shipment not found'
                 };
             }
 
-            if (shipment.status !== 'Label Created') {
+            if (order.shippingInfo.status !== 'Label Created') {
                 return {
                     success: false,
                     error: 'Cannot cancel shipment that has already been picked up'
                 };
             }
 
-            shipment.status = 'Cancelled';
-            shipment.cancelledAt = new Date();
+            await Order.findByIdAndUpdate(order._id, {
+                'shippingInfo.status': 'Cancelled',
+                'shippingInfo.cancelledAt': new Date(),
+                $push: {
+                    'shippingHistory': {
+                        action: 'shipment_cancelled',
+                        shipmentId: shipmentId,
+                        trackingNumber: order.shippingInfo.trackingNumber,
+                        status: 'Cancelled',
+                        timestamp: new Date()
+                    }
+                }
+            });
 
             return {
                 success: true,
                 message: 'Shipment cancelled successfully',
-                refund: shipment.rate * 0.9 // 10% processing rate
+                refund: order.shippingInfo.shippingCost * 0.9 // 10% processing rate
             };
         } catch (error) {
             return {
@@ -296,7 +309,7 @@ class MockShippingService {
         return Math.floor(Math.random() * (max - min + 1)) + min;
     }
 
-    _calculateDeliveryDate(deliveryDaysRange) {
+    _getEstimatedDeliveryDate(deliveryDaysRange) {
         const days = this._getRandomDeliveryDays(deliveryDaysRange);
         const deliveryDate = new Date();
         deliveryDate.setDate(deliveryDate.getDate() + days);
@@ -328,24 +341,31 @@ class MockShippingService {
         return 'REQ_' + crypto.randomBytes(6).toString('hex').toUpperCase();
     }
 
-    async _initializeTracking(trackingNumber, shipment) {
-        const events = [{
-            status: 'Label Created',
-            description: 'Shipping label created',
-            location: 'Origin Facility',
-            timestamp: new Date(),
-            estimatedDeliveryDate: shipment.estimatedDeliveryDate
-        }];
-
-        mockTrackingDB.set(trackingNumber, events);
+    async _initializeTracking(trackingNumber, shippingInfo) {
+        const order = await Order.findOne({ 'shippingInfo.trackingNumber': trackingNumber });
+        
+        if (order) {
+            await Order.findByIdAndUpdate(order._id, {
+                $push: {
+                    'shippingHistory': {
+                        action: 'status_updated',
+                        trackingNumber: trackingNumber,
+                        status: 'Label Created',
+                        location: 'Origin Facility',
+                        timestamp: new Date()
+                    }
+                }
+            });
+        }
     }
 
-    async _updateTrackingProgress(trackingNumber) {
-        const events = mockTrackingDB.get(trackingNumber);
-        if (!events) return;
-
-        const createdAt = events[0].timestamp;
+    async _updateTrackingProgress(trackingNumber, order) {
+        const createdAt = order.shippingInfo.createdAt;
         const hoursSinceCreation = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60);
+
+        // Get current tracking events
+        const trackingEvents = order.shippingHistory.filter(h => h.trackingNumber === trackingNumber);
+        const currentStatusIndex = trackingEvents.length - 1;
 
         // Tracking progression simulation
         let targetStatusIndex = 0;
@@ -355,35 +375,27 @@ class MockShippingService {
         if (hoursSinceCreation > 24) targetStatusIndex = 3; // arrived at facility
         if (hoursSinceCreation > 48) targetStatusIndex = 4; // out for delivery
         if (hoursSinceCreation > 72) targetStatusIndex = 5; // delivered
-        
-        // Add missing events up to current status
-        const currentStatusIndex = events.length -1;
 
         for (let i = currentStatusIndex + 1; i <= targetStatusIndex; i++) {
             const newEvent = {
-                status : TRACKING_STATUSES[i],
-                description: this._getStatusDescription(TRACKING_STATUSES[i]),
+                action: 'status_updated',
+                trackingNumber: trackingNumber,
+                status: TRACKING_STATUSES[i],
                 location: this._getRandomLocation(),
-                timestamp: new Date(createdAt.getTime() + (i * 12 * 60 * 60 * 1000)),
-                estimatedDeliveryDate: events[0].estimatedDeliveryDate
+                timestamp: new Date(createdAt.getTime() + (i * 12 * 60 * 60 * 1000))
             };
-            
-            events.push(newEvent);
+
+            await Order.findByIdAndUpdate(order._id, {
+                $push: { 'shippingHistory': newEvent }
+            });
+
+            if (TRACKING_STATUSES[i] === 'Delivered') {
+                await Order.findByIdAndUpdate(order._id, {
+                    'shippingInfo.status': 'Delivered',
+                    status: 'completed'
+                });
+            }
         }
-
-        mockTrackingDB.set(trackingNumber, events);
-    }
-
-    _getStatusDescription(status) {
-        const descriptions = {
-            'Label Created': 'Shipping label created and ready for pickup',
-            'Package Picked Up': 'Package picked up by carrier',
-            'In Transit': 'Package is on its way to destination',
-            'Arrived at Facility': 'Package arrived at sorting facility',
-            'Out for Delivery': 'Package is out for delivery',
-            'Delivered': 'Package delivered successfully'
-        };
-        return descriptions[status] || status;
     }
 
     _getRandomLocation() {

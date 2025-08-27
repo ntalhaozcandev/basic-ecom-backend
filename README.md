@@ -69,3 +69,79 @@ ecom-backend/
     - No error handling middleware
     - No logging system
     - Missing response standardization
+
+# Payment & Shipping API Documentation
+
+## Payment Endpoints
+
+### Create Payment Intent
+```http
+POST /api/payments/intents
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "amount": 99.99,
+  "currency": "usd",
+  "orderId": "order_id_here",
+  "metadata": {
+    "customer_id": "user_id"
+  }
+}
+```
+
+### Process Direct Payment
+```http
+POST /api/payments/process
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "amount": 99.99,
+  "orderId": "order_id_here",
+  "processor": "STRIPE",
+  "paymentMethodData": {
+    "type": "card",
+    "card": {
+      "number": "4242424242424242",
+      "exp_month": 12,
+      "exp_year": 2025,
+      "cvc": "123"
+    },
+    "billing_details": {
+      "email": "customer@example.com"
+    }
+  }
+}
+```
+
+## Shipping Endpoints
+
+### Calculate Shipping Rates
+```http
+POST /api/shipping/rates
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "packageInfo": {
+    "weight": 2.5,
+    "dimensions": {
+      "length": 12,
+      "width": 8,
+      "height": 6
+    }
+  },
+  "destination": {
+    "country": "US",
+    "state": "NY",
+    "city": "New York",
+    "postalCode": "10001"
+  }
+}
+```
+
+### Track Shipment
+```http
+GET /api/shipping/track/{tracking_number}
+```
