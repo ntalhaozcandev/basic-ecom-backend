@@ -20,6 +20,29 @@ const addressSchema = new Schema({
     phone: String
 }, { _id: false });
 
+const paymentSchema = new Schema({
+    transactionId: String,
+    processor: String,
+    paymentMethod: String,
+    amount: Number,
+    processingFee: Number,
+    paidAt: Date,
+    status: { type: String, enum: ['pending', 'completed', 'failed', 'refunded'] }
+}, { _id: false });
+
+const shipmentSchema = new Schema({
+    shipmentId: String,
+    trackingNumber: String,
+    carrier: {
+        name: String,
+        service: String
+    },
+    cost: Number,
+    labelUrl: String,
+    estimatedDelivery: Date,
+    status: { type: String, enum: ['created', 'picked_up', 'in_transit', 'delivered'] }
+}, { _id: false });
+
 const orderSchema = new Schema({
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     items: { type: [orderItemSchema], required: true },
@@ -29,7 +52,9 @@ const orderSchema = new Schema({
     billingAddress: addressSchema,
     paymentMethod: { type: String },
     paymentStatus: { type: String, enum: ['unpaid', 'paid', 'refunded'], default: 'unpaid' },
-    placedAt: { type: Date, default: Date.now }
+    placedAt: { type: Date, default: Date.now },
+    paymentInfo: paymentSchema,
+    shippingInfo: shipmentSchema
 }, { timestamps: true });
 
 orderSchema.pre('validate', function(next) {

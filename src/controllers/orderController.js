@@ -91,10 +91,22 @@ const getOrder = async (req, res) => {
 };
 
 const getOrders = async (req, res) => {
-    const { status } = req.query;
+    const { status, paymentStatus, userId, fromDate, toDate, minTotal, maxTotal } = req.query;
 
     const filter = {};
     if (status) filter.status = status;
+    if (paymentStatus) filter.paymentStatus = paymentStatus;
+    if (userId) filter.user = userId;
+    if (fromDate || toDate) {
+        filter.createdAt = {};
+        if (fromDate) filter.createdAt.$gte = new Date(fromDate);
+        if (toDate) filter.createdAt.$lte = new Date(toDate);
+    }
+    if (minTotal || maxTotal) {
+        filter.total = {};
+        if (minTotal) filter.total.$gte = Number(minTotal);
+        if (maxTotal) filter.total.$lte = Number(maxTotal);
+    }
 
     try {
         const orders = await Order.find(filter).sort({ createdAt: -1 }).lean();
@@ -107,9 +119,24 @@ const getOrders = async (req, res) => {
 
 const getMyOrders = async (req, res) => {
     const userId = req.user._id;
+    const { status, paymentStatus, fromDate, toDate, minTotal, maxTotal } = req.query;
+
+    const filter = { user: userId };
+    if (status) filter.status = status;
+    if (paymentStatus) filter.paymentStatus = paymentStatus;
+    if (fromDate || toDate) {
+        filter.createdAt = {};
+        if (fromDate) filter.createdAt.$gte = new Date(fromDate);
+        if (toDate) filter.createdAt.$lte = new Date(toDate);
+    }
+    if (minTotal || maxTotal) {
+        filter.total = {};
+        if (minTotal) filter.total.$gte = Number(minTotal);
+        if (maxTotal) filter.total.$lte = Number(maxTotal);
+    }
 
     try {
-        const orders = await Order.find({ user: userId }).sort({ createdAt: -1 }).lean();
+        const orders = await Order.find(filter).sort({ createdAt: -1 }).lean();
         return res.status(200).json({ orders });
     } catch (error) {
         console.log('Error fetching user orders:', error);

@@ -15,12 +15,12 @@ ecom-backend/
 └── README.md
 ```
 # TODO
-- UI/UX for the app
+- UI/UX for the app ✅
 - Product Categories & Organization
-    - Category system for products
-    - Missing product search and filtering capabilities
+    - Category system for products ✅
+    - Missing product search and filtering capabilities ✅
     - Product sorting options (price, popularity, rating)
-    - Pagination for product listings
+    - Pagination for product listings ✅
 - Inventory Management
     - Bulk inventory updates
     - Product variants (size, color, etc.)
@@ -34,7 +34,7 @@ ecom-backend/
     - Missing user profile information (name, phone, address)
     - Saved addresses for shipping/billing
     - User preferences
-    - Order history for users
+    - Order history for users ✅
     - Wishlist functionality
 - Payment Integration
     - Actual payment processing (Stripe, PayPal, etc.)
@@ -47,9 +47,9 @@ ecom-backend/
     - Cart total calculation in responses
     - Cart item validation against current product prices
 - Admin Features
-    - Admin-only routes protection
-    - Sales analytics/dashboard
-    - User management for admins
+    - Admin-only routes protection ✅
+    - Sales analytics/dashboard 
+    - User management for admins ✅
     - Bulk product operations
 
 ### Other Todo
