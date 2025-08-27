@@ -69,11 +69,18 @@ const createOrder = async (req, res) => {
 
 const getOrder = async (req, res) => {
     const { id } = req.params;
+    const userId = req.user._id;
+    const isAdmin = req.user.role === 'admin';
 
     try {
         const order = await Order.findById(id).lean();
         if (!order) {
             return res.status(404).json({ error: 'Order not found' });
+        }
+
+        // Only allow if user is admin or owns the order
+        if (!isAdmin && String(order.user) !== String(userId)) {
+            return res.status(403).json({ error: 'Forbidden: You do not have access to this order' });
         }
 
         return res.status(200).json({ order });
@@ -98,6 +105,18 @@ const getOrders = async (req, res) => {
     }
 };
 
+const getMyOrders = async (req, res) => {
+    const userId = req.user._id;
+
+    try {
+        const orders = await Order.find({ user: userId }).sort({ createdAt: -1 }).lean();
+        return res.status(200).json({ orders });
+    } catch (error) {
+        console.log('Error fetching user orders:', error);
+        return res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
 const updateOrderStatus = async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
@@ -120,5 +139,6 @@ module.exports = {
     createOrder,
     getOrder,
     getOrders,
-    updateOrderStatus
+    updateOrderStatus,
+    getMyOrders
 };
